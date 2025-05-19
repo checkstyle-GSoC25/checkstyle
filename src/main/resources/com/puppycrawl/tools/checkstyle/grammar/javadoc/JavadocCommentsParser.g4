@@ -4,6 +4,11 @@ options {
   tokenVocab = JavadocCommentsLexer;
 }
 
-javadoc:
-    EOF
+javadoc
+    : NEWLINE* mainDescription EOF;
+
+mainDescription: javadocLine*;
+
+javadocLine
+    :  LEADING_ASTERISK (NEWLINE)*
     ;

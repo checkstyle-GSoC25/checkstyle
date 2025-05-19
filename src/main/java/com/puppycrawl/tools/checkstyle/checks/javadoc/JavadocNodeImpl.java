@@ -25,6 +25,7 @@ import java.util.Optional;
 import com.puppycrawl.tools.checkstyle.api.DetailNode;
 import com.puppycrawl.tools.checkstyle.utils.JavadocUtil;
 import com.puppycrawl.tools.checkstyle.utils.UnmodifiableCollectionUtil;
+import org.antlr.v4.runtime.Token;
 
 /**
  * Implementation of DetailNode interface that is mutable.
@@ -72,6 +73,18 @@ public class JavadocNodeImpl implements DetailNode {
      */
     private DetailNode parent;
 
+    /**
+     * Next sibling node.
+     */
+    private DetailNode nextSibling;
+
+    public void initialize(Token token) {
+        this.type = token.getType();
+        this.text = token.getText();
+        this.lineNumber = token.getLine() - 1;
+        this.columnNumber = token.getCharPositionInLine();
+    }
+
     @Override
     public int getType() {
         return type;
@@ -107,6 +120,11 @@ public class JavadocNodeImpl implements DetailNode {
     @Override
     public int getIndex() {
         return index;
+    }
+
+    @Override
+    public DetailNode getNextSibling() {
+        return nextSibling;
     }
 
     /**
@@ -170,6 +188,47 @@ public class JavadocNodeImpl implements DetailNode {
      */
     public void setIndex(int index) {
         this.index = index;
+    }
+
+    /**
+     * Sets next sibling node.
+     * @param nextSibling Next sibling node.
+     */
+    public void setNextSibling(DetailNode nextSibling) {
+        this.nextSibling = nextSibling;
+        if (nextSibling != null && parent != null) {
+            ((JavadocNodeImpl) nextSibling).setParent(parent);
+        }
+    }
+
+    /**
+     * Adds a child node to this node.
+     * @param newChild Child node to be added.
+     */
+    public void addChild(JavadocNodeImpl newChild) {
+        DetailNode[] newChildren;
+
+        if (children == null) {
+            newChildren = new DetailNode[1];
+            newChildren[0] = newChild;
+        }
+        else {
+            int childrenCount = children.length;
+            newChildren = Arrays.copyOf(children, childrenCount + 1);
+            newChildren[childrenCount] = newChild;
+
+            // Traverse to the actual last sibling
+            DetailNode lastSibling = children[childrenCount - 1];
+            while (lastSibling.getNextSibling() != null) {
+                lastSibling = lastSibling.getNextSibling();
+            }
+
+            ((JavadocNodeImpl) lastSibling).setNextSibling(newChild);
+        }
+
+        newChild.setParent(this);
+        newChild.setIndex(newChildren.length - 1);
+        setChildren(newChildren);
     }
 
     @Override
