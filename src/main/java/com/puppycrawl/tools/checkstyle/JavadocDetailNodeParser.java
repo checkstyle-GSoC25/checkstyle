@@ -23,6 +23,8 @@ import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.List;
 
+import com.puppycrawl.tools.checkstyle.grammar.javadoc.JavadocCommentsLexer;
+import com.puppycrawl.tools.checkstyle.grammar.javadoc.JavadocCommentsParser;
 import org.antlr.v4.runtime.BaseErrorListener;
 import org.antlr.v4.runtime.BufferedTokenStream;
 import org.antlr.v4.runtime.CharStreams;
@@ -557,6 +559,62 @@ public class JavadocDetailNodeParser {
             first = false;
         }
         return result.toString();
+    }
+
+    public ParseStatus parseJavadocComment(DetailAST javadocCommentAst) {
+        blockCommentLineNumber = javadocCommentAst.getLineNo();
+
+        final String javadocComment = JavadocUtil.getJavadocCommentContent(javadocCommentAst);
+
+        final ParseStatus result = new ParseStatus();
+
+        try {
+            final JavadocCommentsParser javadocParser = createJavadocParser(javadocComment);
+
+            final JavadocCommentsParser.JavadocContext javadoc = javadocParser.javadoc();
+
+            final DetailNode tree = new JavadocCommentsAstVisitor().visit(javadoc);
+
+            // adjust first line to indent of /**
+            adjustFirstLineToJavadocIndent(tree,
+                        javadocCommentAst.getColumnNo()
+                                + JAVADOC_START.length());
+            result.setTree(tree);
+        }
+        catch (ParseCancellationException | IllegalArgumentException exc) {
+           // until https://github.com/checkstyle-GSoC25/checkstyle/issues/11
+            result.setTree(new JavadocNodeImpl());
+        }
+
+        return result;
+    }
+
+    /**
+     * Parses block comment content as javadoc comment.
+     *
+     * @param javadocComment
+     *        javadoc comment content.
+     * @return {@link JavadocCommentsParser} instance
+     */
+    private static JavadocCommentsParser createJavadocParser(String javadocComment) {
+        final JavadocCommentsLexer lexer =
+                        new JavadocCommentsLexer(CharStreams.fromString(javadocComment));
+
+        final CommonTokenStream tokens = new CommonTokenStream(lexer);
+
+        final JavadocCommentsParser parser = new JavadocCommentsParser(tokens);
+
+        // set prediction mode to SLL to speed up parsing
+        parser.getInterpreter().setPredictionMode(PredictionMode.SLL);
+
+        // remove default error listeners
+        parser.removeErrorListeners();
+
+        // JavadocParserErrorStrategy stops parsing on first parse error encountered unlike the
+        // DefaultErrorStrategy used by ANTLR which rather attempts error recovery.
+        parser.setErrorHandler(new CheckstyleParserErrorStrategy());
+
+        return parser;
     }
 
     /**
