@@ -208,6 +208,10 @@ public class JavadocNodeImpl implements DetailNode {
     public void addChild(JavadocNodeImpl newChild) {
         DetailNode[] newChildren;
 
+        if (newChild == null) {
+            return;
+        }
+
         if (children == null) {
             newChildren = new DetailNode[1];
             newChildren[0] = newChild;

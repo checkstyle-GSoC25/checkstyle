@@ -5,10 +5,6 @@ options {
 }
 
 javadoc
-    : NEWLINE* mainDescription EOF;
+    : mainDescription EOF;
 
-mainDescription: javadocLine*;
-
-javadocLine
-    :  LEADING_ASTERISK (NEWLINE)*
-    ;
+mainDescription: (NEWLINE | TEXT)*;

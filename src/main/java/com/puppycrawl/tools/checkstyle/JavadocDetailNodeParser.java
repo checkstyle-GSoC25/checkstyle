@@ -562,18 +562,28 @@ public class JavadocDetailNodeParser {
     }
 
     public ParseStatus parseJavadocComment(DetailAST javadocCommentAst) {
-        blockCommentLineNumber = javadocCommentAst.getLineNo();
-
         final String javadocComment = JavadocUtil.getJavadocCommentContent(javadocCommentAst);
-
         final ParseStatus result = new ParseStatus();
 
+        final JavadocCommentsLexer lexer =
+                        new JavadocCommentsLexer(CharStreams.fromString(javadocComment));
+        final CommonTokenStream tokens = new CommonTokenStream(lexer);
+        final JavadocCommentsParser parser = new JavadocCommentsParser(tokens);
+
+        // set prediction mode to SLL to speed up parsing
+        parser.getInterpreter().setPredictionMode(PredictionMode.SLL);
+
+        // remove default error listeners
+        parser.removeErrorListeners();
+
+        // JavadocParserErrorStrategy stops parsing on first parse error encountered unlike the
+        // DefaultErrorStrategy used by ANTLR which rather attempts error recovery.
+        parser.setErrorHandler(new CheckstyleParserErrorStrategy());
+
         try {
-            final JavadocCommentsParser javadocParser = createJavadocParser(javadocComment);
+            final JavadocCommentsParser.JavadocContext javadoc = parser.javadoc();
 
-            final JavadocCommentsParser.JavadocContext javadoc = javadocParser.javadoc();
-
-            final DetailNode tree = new JavadocCommentsAstVisitor().visit(javadoc);
+            final DetailNode tree = new JavadocCommentsAstVisitor(tokens).visit(javadoc);
 
             // adjust first line to indent of /**
             adjustFirstLineToJavadocIndent(tree,
