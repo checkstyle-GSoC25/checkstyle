@@ -27,4 +27,7 @@ public final class JavadocCommentsTokenTypes {
      * Newline symbol - '\n'.
      */
     public static final int NEWLINE = JavadocCommentsLexer.NEWLINE;
+
+
+    public static final int TEXT = JavadocCommentsLexer.TEXT;
 }
