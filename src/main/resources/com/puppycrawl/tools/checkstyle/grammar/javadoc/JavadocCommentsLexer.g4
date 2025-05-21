@@ -1,7 +1,11 @@
 lexer grammar JavadocCommentsLexer;
 
+channels {
+    LEADING_ASTERISKS
+}
+
 tokens {
-    JAVADOC, LEADING_ASTERISK, NEWLINE
+    JAVADOC, LEADING_ASTERISK, NEWLINE, TEXT
 }
 
 @lexer::members {
@@ -29,9 +33,13 @@ tokens {
 }
 
 LEADING_ASTERISK
-    : [ \t]* '*' {isAfterNewline()}?
+    : [ \t]* '*' {isAfterNewline()}? -> channel(LEADING_ASTERISKS)
     ;
 
 NEWLINE
     : '\r'? '\n' {setAfterNewline();}
+    ;
+
+TEXT
+    : ~[@*{}\r\n]+
     ;
