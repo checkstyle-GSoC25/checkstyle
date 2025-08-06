@@ -13,8 +13,8 @@
 #####################################################################################
 name: regression-report
 env:
-  AWS_REGION: us-east-2
-  AWS_BUCKET_NAME: "checkstyle-diff-reports"
+  AWS_REGION: us-east-1
+  AWS_BUCKET_NAME: "checkstyle-diff-reports-bucket"
   USER_LOGIN: ${{ github.event.issue.user.login }}
   # yamllint disable-line rule:line-length
   DEFAULT_PROJECTS_LINK: "https://raw.githubusercontent.com/checkstyle/test-configs/main/extractor/src/main/resources/list-of-projects.yml"
