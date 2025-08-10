@@ -207,21 +207,14 @@ FIELD_TYPE: ([a-zA-Z0-9_$] | '.' | '[' | ']')+ -> mode(TEXT_MODE);
 mode SEE_MODE;
 STRING_LITERAL: '"' .*? '"' {inSeeReferencePart = false;} -> mode(TEXT_MODE);
 See_TAG_OPEN: '<' {_input.seek(_input.index() - 1); inSeeReferencePart = false;} -> skip, mode(TEXT_MODE);
-See_IDENTIFIER: ([a-zA-Z0-9_$] | '.')+
-    {
-        int la = _input.LA(1);
-        if (Character.isWhitespace(la) || la == '\n' || la == '\r') {
-            inSeeReferencePart = false;
-            mode(TEXT_MODE);
-        }
-    } -> type(IDENTIFIER);
-
-See_HASH: '#' -> type(HASH);
-See_LPAREN: '(' -> type(LPAREN), pushMode(PARAMETER_LIST);
 See_NEWLINE
     : NEWLINE {setAfterNewline();} -> pushMode(START_OF_LINE), type(NEWLINE), channel(NEWLINES)
     ;
 See_WS: [ \t]+ -> type(WS), channel(WHITESPACES);
+SWITCH_TO_REFERENCE_MODE
+    : {true}?
+    -> skip, pushMode(REFERENCE_MODE)
+    ;
 
 // --- QUALIFIED_IDENTIFIER ---
 // Purpose: Parses fully qualified class or interface names, such as in @users or @provides tags.
@@ -256,10 +249,10 @@ Param_WS: [ \t]+ -> type(WS), channel(WHITESPACES);
 // Example: "{@code int x = 5;}"
 mode JAVADOC_INLINE_TAG_MODE;
 CODE: 'code' -> pushMode(PLAIN_TEXT_TAG);
-LINK: 'link'-> pushMode(LINK_MODE);
-LINKPLAIN: 'linkplain' -> pushMode(LINK_MODE);
+LINK: 'link'-> pushMode(REFERENCE_MODE);
+LINKPLAIN: 'linkplain' -> pushMode(REFERENCE_MODE);
 VALUE: 'value' -> pushMode(VALUE_MODE);
-INHERIT_DOC: 'inheritDoc' -> pushMode(LINK_MODE);
+INHERIT_DOC: 'inheritDoc' -> pushMode(REFERENCE_MODE);
 SUMMARY: 'summary' -> pushMode(INLINE_TAG_DESCRIPTION);
 SYSTEM_PROPERTY: 'systemProperty' -> pushMode(VALUE_MODE);
 INDEX: 'index' -> pushMode(INDEX_TERM_MODE);
@@ -298,25 +291,30 @@ mode SNIPPET_ATTR_VALUE;
 Snippet_NEWLINE: NEWLINE {setAfterNewline();} -> pushMode(START_OF_LINE), type(NEWLINE), channel(NEWLINES);
 Snippet_ATTRIBUTE_VALUE: ' '* Snippet_ATTRIBUTE -> type(ATTRIBUTE_VALUE), popMode;
 Snippet_ATTRIBUTE: Snippet_DOUBLE_QUOTE_STRING | Snippet_SINGLE_QUOTE_STRING | Snippet_ATTCHARS | Snippet_HEXCHARS | Snippet_DECCHARS;
-fragment Snippet_ATTCHARS: ATTCHAR+ ' '?;
+fragment Snippet_ATTCHARS: Snippet_ATTCHAR+ ' '?;
 fragment Snippet_ATTCHAR: '-' | '_' | '.' | '/' | '+' | ',' | '?' | '=' | ';' | '#' | [0-9a-zA-Z];
 fragment Snippet_HEXCHARS: '#' [0-9a-fA-F]+;
 fragment Snippet_DECCHARS: [0-9]+ '%'?;
 fragment Snippet_DOUBLE_QUOTE_STRING: '"' ~[:"]* '"';
 fragment Snippet_SINGLE_QUOTE_STRING: '\'' ~[:']* '\'';
 
-// --- LINK_MODE ---
+// --- REFERENCE_MODE ---
 // Purpose: Parses the reference inside {@link}, {@linkplain}, {@inheritDoc} inline tags.
 // Example: "{@link java.util.List#add(Object)}"
 // Example: "{@linkplain java.util.Map}"
-mode LINK_MODE;
+mode REFERENCE_MODE;
 EXTENDS: 'extends';
 SUPER: 'super';
 IDENTIFIER: ([a-zA-Z0-9_$] | '.')+
     {
         int la = _input.LA(1);
         if (Character.isWhitespace(la) || la == '\n' || la == '\r') {
-            pushMode(LINK_TAG_DESCRIPTION);
+            if (inSeeReferencePart) {
+                pushMode(TEXT_MODE);
+                inSeeReferencePart = false;
+            } else {
+                pushMode(LINK_TAG_DESCRIPTION);
+            }
         }
     };
 QUESTION: '?';
@@ -326,7 +324,17 @@ SLASH: '/';
 Link_WS: [ \t]+ -> type(WS), channel(WHITESPACES);
 Link_JAVADOC_INLINE_TAG_END: '}' -> type(JAVADOC_INLINE_TAG_END), popMode, popMode;
 LT: '<';
-GT: '>' { if (Character.isWhitespace(_input.LA(1))) pushMode(LINK_TAG_DESCRIPTION); };
+GT: '>' {
+    int la = _input.LA(1);
+    if (Character.isWhitespace(la) || la == '\n' || la == '\r') {
+        if (inSeeReferencePart) {
+            pushMode(TEXT_MODE);
+            inSeeReferencePart = false;
+        } else {
+            pushMode(LINK_TAG_DESCRIPTION);
+        }
+    }
+};
 Link_COMMA: ',' -> type(COMMA);
 Link_NEWLINE: NEWLINE {setAfterNewline();} -> pushMode(START_OF_LINE), type(NEWLINE), channel(NEWLINES);
 
