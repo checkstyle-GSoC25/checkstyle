@@ -173,7 +173,7 @@ EXCEPTION: 'exception' -> pushMode(QUALIFIED_IDENTIFIER);
 THROWS: 'throws' -> pushMode(QUALIFIED_IDENTIFIER);
 SINCE: 'since' -> pushMode(TEXT_MODE);
 VERSION: 'version' -> pushMode(TEXT_MODE);
-SEE: 'see' {inSeeReferencePart = true;} -> pushMode(SEE_MODE);
+SEE: 'see' {inSeeReferencePart = true;} -> pushMode(REFERENCE_MODE);
 LITERAL_HIDDEN: 'hidden' -> pushMode(TEXT_MODE);
 USES: 'uses' -> pushMode(QUALIFIED_IDENTIFIER);
 PROVIDES: 'provides' -> pushMode(QUALIFIED_IDENTIFIER);
@@ -199,22 +199,6 @@ mode FIELD_TYPE_MODE;
 FieldType_WS: [ \t]+ -> type(WS), channel(WHITESPACES);
 FIELD_TYPE: ([a-zA-Z0-9_$] | '.' | '[' | ']')+ -> mode(TEXT_MODE);
 
-// --- SEE_MODE ---
-// Purpose: Parses the content of the @see tag, which can include references, strings, or links.
-// Example: "@see java.util.List"
-// Example: "@see "some string""
-// Example: "@see <a href='...'>link</a>"
-mode SEE_MODE;
-STRING_LITERAL: '"' .*? '"' {inSeeReferencePart = false;} -> mode(TEXT_MODE);
-See_TAG_OPEN: '<' {_input.seek(_input.index() - 1); inSeeReferencePart = false;} -> skip, mode(TEXT_MODE);
-See_NEWLINE
-    : NEWLINE {setAfterNewline();} -> pushMode(START_OF_LINE), type(NEWLINE), channel(NEWLINES)
-    ;
-See_WS: [ \t]+ -> type(WS), channel(WHITESPACES);
-SWITCH_TO_REFERENCE_MODE
-    : {true}?
-    -> skip, pushMode(REFERENCE_MODE)
-    ;
 
 // --- QUALIFIED_IDENTIFIER ---
 // Purpose: Parses fully qualified class or interface names, such as in @users or @provides tags.
@@ -323,7 +307,7 @@ LPAREN: '(' -> pushMode(PARAMETER_LIST);
 SLASH: '/';
 Link_WS: [ \t]+ -> type(WS), channel(WHITESPACES);
 Link_JAVADOC_INLINE_TAG_END: '}' -> type(JAVADOC_INLINE_TAG_END), popMode, popMode;
-LT: '<';
+LT: {!inSeeReferencePart || previousTokenType == IDENTIFIER}? '<';
 GT: '>' {
     int la = _input.LA(1);
     if (Character.isWhitespace(la) || la == '\n' || la == '\r') {
@@ -337,6 +321,8 @@ GT: '>' {
 };
 Link_COMMA: ',' -> type(COMMA);
 Link_NEWLINE: NEWLINE {setAfterNewline();} -> pushMode(START_OF_LINE), type(NEWLINE), channel(NEWLINES);
+STRING_LITERAL: '"' .*? '"' {inSeeReferencePart = false;} -> mode(TEXT_MODE);
+See_TAG_OPEN:'<' {_input.seek(_input.index() - 1); inSeeReferencePart = false;} -> skip, mode(TEXT_MODE);
 
 fragment LetterOrDigit: Letter | [0-9];
 fragment Letter: [a-zA-Z$_];
