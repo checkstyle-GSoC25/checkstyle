@@ -199,7 +199,7 @@ public class JavadocParagraphCheck extends AbstractJavadocCheck {
         return detailNode.getType() == JavadocCommentsTokenTypes.HTML_ELEMENT
                 && detailNode.getFirstChild().getType() == JavadocCommentsTokenTypes.HTML_TAG_START
                 && JavadocUtil.findFirstToken(detailNode.getFirstChild(), JavadocCommentsTokenTypes.TAG_NAME)
-                .getText().equals("p");
+                .getText().equalsIgnoreCase("p");
     }
 
     /**
