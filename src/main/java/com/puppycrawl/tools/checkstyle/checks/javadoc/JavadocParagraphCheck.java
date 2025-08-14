@@ -24,6 +24,7 @@ import java.util.Set;
 
 import javax.annotation.Nullable;
 
+import com.puppycrawl.tools.checkstyle.DetailNodeTreeStringPrinter;
 import com.puppycrawl.tools.checkstyle.StatelessCheck;
 import com.puppycrawl.tools.checkstyle.api.DetailNode;
 import com.puppycrawl.tools.checkstyle.api.JavadocCommentsTokenTypes;
@@ -187,6 +188,9 @@ public class JavadocParagraphCheck extends AbstractJavadocCheck {
 
     @Override
     public void visitJavadocToken(DetailNode ast) {
+        if (ast.getLineNumber() == 87) {
+            System.out.println(DetailNodeTreeStringPrinter.printTree(ast.getParent(), "", ""));
+        }
         if (ast.getType() == JavadocCommentsTokenTypes.NEWLINE && isEmptyLine(ast)) {
             checkEmptyLine(ast);
         }
@@ -222,13 +226,12 @@ public class JavadocParagraphCheck extends AbstractJavadocCheck {
      */
     private void checkParagraphTag(DetailNode tag) {
 
-        // looking at line 86
-        if (tag.getLineNumber() == 86) {
-            System.out.println();
+        if (tag.getLineNumber() == 58) {
+            System.out.println(DetailNodeTreeStringPrinter.printTree(tag, "", ""));
         }
         if (!isNestedParagraph(tag)) {
             final DetailNode newLine = getNearestEmptyLine(tag);
-            if (isFirstParagraph(tag)) {
+            if (isRedundantParagraphTag(tag)) {
                 log(tag.getLineNumber(), tag.getColumnNumber(), MSG_REDUNDANT_PARAGRAPH);
             }
             else if (newLine == null || tag.getLineNumber() - newLine.getLineNumber() != 1) {
@@ -279,14 +282,13 @@ public class JavadocParagraphCheck extends AbstractJavadocCheck {
      */
     @Nullable
     private static String findFollowedBlockTagName(DetailNode tag) {
-        final DetailNode htmlElement = findFirstHtmlElementAfter(tag);
-        String blockTagName = null;
-
-        if (htmlElement != null) {
-            blockTagName = getHtmlElementName(htmlElement);
-        }
-
-        return blockTagName;
+        final Optional<DetailNode> htmlElement = findFirstHtmlElementAfter(tag);
+        return htmlElement
+                .map(element -> JavadocUtil.findFirstToken(element, JavadocCommentsTokenTypes.HTML_TAG_START))
+                .map(start -> JavadocUtil.findFirstToken(start, JavadocCommentsTokenTypes.TAG_NAME))
+                .map(DetailNode::getText)
+                .filter(BLOCK_TAGS::contains)
+                .orElse(null);
     }
 
     /**
@@ -295,48 +297,15 @@ public class JavadocParagraphCheck extends AbstractJavadocCheck {
      * @param tag html tag.
      * @return first html element after the paragraph tag or null if not found.
      */
-    @Nullable
-    private static DetailNode findFirstHtmlElementAfter(DetailNode tag) {
-        DetailNode htmlElement = getNextSibling(tag);
+    private static Optional<DetailNode> findFirstHtmlElementAfter(DetailNode tag) {
 
-        while (htmlElement != null
-                && htmlElement.getType() != JavadocCommentsTokenTypes.HTML_ELEMENT) {
-            if ((htmlElement.getType() == JavadocCommentsTokenTypes.TEXT
-                    || htmlElement.getType() == JavadocCommentsTokenTypes.JAVADOC_INLINE_TAG)
-                    && !CommonUtil.isBlank(htmlElement.getText())) {
-                htmlElement = null;
-                break;
-            }
-            htmlElement = JavadocUtil.getNextSibling(htmlElement);
+        if (tag.getLineNumber() == 58) {
+            System.out.println(DetailNodeTreeStringPrinter.printTree(tag, "", ""));
         }
 
-        return htmlElement;
-    }
-
-    /**
-     * Finds and returns first block-level html element name.
-     *
-     * @param htmlElement block-level html tag.
-     * @return block-level html element name or null if not found.
-     */
-    @Nullable
-    private static String getHtmlElementName(DetailNode htmlElement) {
-        final DetailNode htmlTag;
-        if (htmlElement.getType() == JavadocCommentsTokenTypes.HTML_ELEMENT) {
-            htmlTag = htmlElement;
-        }
-        else {
-            htmlTag = JavadocUtil.getFirstChild(htmlElement);
-        }
-        final DetailNode htmlTagFirstChild = JavadocUtil.getFirstChild(htmlTag);
-        final DetailNode htmlTagName =
-                JavadocUtil.findFirstToken(htmlTagFirstChild, JavadocCommentsTokenTypes.TAG_NAME);
-        String blockTagName = null;
-        if (htmlTagName != null && BLOCK_TAGS.contains(htmlTagName.getText())) {
-            blockTagName = htmlTagName.getText();
-        }
-
-        return blockTagName;
+        return JavadocUtil.findFirstTokenByPredicate(tag,
+                        node -> node.getType() == JavadocCommentsTokenTypes.HTML_CONTENT)
+                .map(content -> JavadocUtil.findFirstToken(content, JavadocCommentsTokenTypes.HTML_ELEMENT));
     }
 
     /**
@@ -364,7 +333,11 @@ public class JavadocParagraphCheck extends AbstractJavadocCheck {
         boolean result = false;
         DetailNode previousSibling = newLine.getPreviousSibling();
         if (previousSibling != null
-                && previousSibling.getParent().getType() == JavadocCommentsTokenTypes.JAVADOC_CONTENT) {
+                && previousSibling.getParent().getType() == JavadocCommentsTokenTypes.JAVADOC_CONTENT
+                || previousSibling != null && previousSibling.getParent() != null
+                && previousSibling.getParent().getParent() != null
+                && previousSibling.getParent().getParent().getType()
+                    == JavadocCommentsTokenTypes.JAVADOC_CONTENT) {
             if (previousSibling.getType() == JavadocCommentsTokenTypes.TEXT
                     && CommonUtil.isBlank(previousSibling.getText())) {
                 previousSibling = previousSibling.getPreviousSibling();
@@ -381,14 +354,34 @@ public class JavadocParagraphCheck extends AbstractJavadocCheck {
      * @param paragraphTag paragraph tag.
      * @return true, if line with paragraph tag is first line in javadoc.
      */
-    private static boolean isFirstParagraph(DetailNode paragraphTag) {
-        return Optional.of(paragraphTag.getParent())
-                .map(p -> {
-                    while (p.get == JavadocCommentsTokenTypes.HTML_ELEMENT) {}
-                })
+    private static boolean isRedundantParagraphTag(DetailNode paragraphTag) {
+
+        if (paragraphTag.getLineNumber() == 35) {
+            System.out.println(DetailNodeTreeStringPrinter.printTree(paragraphTag, "", ""));
+        }
+
+        final DetailNode parent = paragraphTag.getParent();
+
+        final boolean isFirstParagraphTag = JavadocUtil.findFirstTokenByPredicate(parent,
+                        node -> node.getType() == JavadocCommentsTokenTypes.HTML_ELEMENT)
                 .filter(c -> c.equals(paragraphTag))
                 .isPresent();
 
+        // If there is no content, we would log a different message
+        final boolean hasEmbeddedText = JavadocUtil.findFirstTokenByPredicate(paragraphTag,
+                        node -> node.getType() == JavadocCommentsTokenTypes.HTML_CONTENT)
+                .isPresent();
+
+        // If there is no text before the paragraph tag, it is redundant
+        final boolean hasTextBeforeParagraphTag = JavadocUtil.findFirstTokenByPredicate(parent,
+                node -> node.getType() == JavadocCommentsTokenTypes.TEXT
+                        && !CommonUtil.isBlank(node.getText()))
+                .filter(text -> text.getLineNumber() < paragraphTag.getLineNumber()
+                        || (text.getLineNumber() == paragraphTag.getLineNumber()
+                        && text.getColumnNumber() < paragraphTag.getColumnNumber()))
+                .isPresent();
+
+        return isFirstParagraphTag && hasEmbeddedText && !hasTextBeforeParagraphTag;
     }
     
     /**
