@@ -221,7 +221,6 @@ public class JavadocParagraphCheck extends AbstractJavadocCheck {
      * @param tag html tag.
      */
     private void checkParagraphTag(DetailNode tag) {
-        if (tag == null)
         if (!isNestedParagraph(tag)) {
             final DetailNode newLine = getNearestEmptyLine(tag);
             if (isFirstParagraph(tag)) {
@@ -422,7 +421,10 @@ public class JavadocParagraphCheck extends AbstractJavadocCheck {
      * @return true, if the paragraph tag is immediately followed by the new line.
      */
     private static boolean isImmediatelyFollowedByNewLine(DetailNode tag) {
-        return tag.getNextSibling() != null
+        return tag.getFirstChild() != null
+                && tag.getFirstChild().getNextSibling() != null
+                && tag.getFirstChild().getNextSibling().getType() == JavadocCommentsTokenTypes.NEWLINE
+                || tag.getNextSibling() != null
                 && tag.getNextSibling().getType() == JavadocCommentsTokenTypes.NEWLINE;
     }
 
