@@ -94,16 +94,10 @@ import com.puppycrawl.tools.checkstyle.utils.TokenUtil;
  * {@code at.clause.order}
  * </li>
  * <li>
- * {@code javadoc.missed.html.close}
- * </li>
- * <li>
  * {@code javadoc.parse.rule.error}
  * </li>
  * <li>
  * {@code javadoc.unclosedHtml}
- * </li>
- * <li>
- * {@code javadoc.wrong.singleton.html.tag}
  * </li>
  * </ul>
  *

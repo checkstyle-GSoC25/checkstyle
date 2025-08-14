@@ -67,16 +67,10 @@ import com.puppycrawl.tools.checkstyle.utils.TokenUtil;
  * </p>
  * <ul>
  * <li>
- * {@code javadoc.missed.html.close}
- * </li>
- * <li>
  * {@code javadoc.parse.rule.error}
  * </li>
  * <li>
  * {@code javadoc.unclosedHtml}
- * </li>
- * <li>
- * {@code javadoc.wrong.singleton.html.tag}
  * </li>
  * <li>
  * {@code singleline.javadoc}

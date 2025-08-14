@@ -88,16 +88,10 @@ import com.puppycrawl.tools.checkstyle.api.JavadocTokenTypes;
  * {@code javadoc.blockTagLocation}
  * </li>
  * <li>
- * {@code javadoc.missed.html.close}
- * </li>
- * <li>
  * {@code javadoc.parse.rule.error}
  * </li>
  * <li>
  * {@code javadoc.unclosedHtml}
- * </li>
- * <li>
- * {@code javadoc.wrong.singleton.html.tag}
  * </li>
  * </ul>
  *
