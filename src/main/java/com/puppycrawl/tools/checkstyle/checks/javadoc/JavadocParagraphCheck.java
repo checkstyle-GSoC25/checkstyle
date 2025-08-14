@@ -221,6 +221,11 @@ public class JavadocParagraphCheck extends AbstractJavadocCheck {
      * @param tag html tag.
      */
     private void checkParagraphTag(DetailNode tag) {
+
+        // looking at line 86
+        if (tag.getLineNumber() == 86) {
+            System.out.println();
+        }
         if (!isNestedParagraph(tag)) {
             final DetailNode newLine = getNearestEmptyLine(tag);
             if (isFirstParagraph(tag)) {
@@ -239,7 +244,7 @@ public class JavadocParagraphCheck extends AbstractJavadocCheck {
             if (!allowNewlineParagraph && isImmediatelyFollowedByNewLine(tag)) {
                 log(tag.getLineNumber(), tag.getColumnNumber(), MSG_MISPLACED_TAG);
             }
-            if (isImmediatelyFollowedByText(tag)) {
+            if (isNotImmediatelyFollowedByText(tag)) {
                 log(tag.getLineNumber(), tag.getColumnNumber(), MSG_MISPLACED_TAG);
             }
         }
@@ -378,12 +383,14 @@ public class JavadocParagraphCheck extends AbstractJavadocCheck {
      */
     private static boolean isFirstParagraph(DetailNode paragraphTag) {
         return Optional.of(paragraphTag.getParent())
-                .map(p -> p.getFirstChild())
+                .map(p -> {
+                    while (p.get == JavadocCommentsTokenTypes.HTML_ELEMENT) {}
+                })
                 .filter(c -> c.equals(paragraphTag))
                 .isPresent();
 
     }
-
+    
     /**
      * Finds and returns nearest empty line in javadoc.
      *
@@ -408,10 +415,20 @@ public class JavadocParagraphCheck extends AbstractJavadocCheck {
      * @param tag html tag.
      * @return true, if the paragraph tag is immediately followed by the text.
      */
-    private static boolean isImmediatelyFollowedByText(DetailNode tag) {
+    private static boolean isNotImmediatelyFollowedByText(DetailNode tag) {
 
-        return tag.getNextSibling() != null
-                && tag.getNextSibling().getType() == JavadocCommentsTokenTypes.TEXT;
+        // TODO: extract to it's own condition AND reconsider EOF
+        // TODO: create some utility for finding html text?
+        return tag.getNextSibling() == null
+                || tag.getNextSibling() != null
+                && tag.getNextSibling().getType() == JavadocCommentsTokenTypes.TEXT
+                && tag.getNextSibling().getText().startsWith(" ")
+                || tag.getFirstChild() != null
+                && tag.getFirstChild().getNextSibling() != null
+                && tag.getFirstChild().getNextSibling().getFirstChild() != null
+                && tag.getFirstChild().getNextSibling().getFirstChild().getType() == JavadocCommentsTokenTypes.TEXT
+                && tag.getFirstChild().getNextSibling().getFirstChild().getText().startsWith(" ")
+                ;
     }
 
     /**
@@ -425,7 +442,11 @@ public class JavadocParagraphCheck extends AbstractJavadocCheck {
                 && tag.getFirstChild().getNextSibling() != null
                 && tag.getFirstChild().getNextSibling().getType() == JavadocCommentsTokenTypes.NEWLINE
                 || tag.getNextSibling() != null
-                && tag.getNextSibling().getType() == JavadocCommentsTokenTypes.NEWLINE;
+                && tag.getNextSibling().getType() == JavadocCommentsTokenTypes.NEWLINE
+                && tag.getFirstChild() != null
+                // There is nothing else besides the tag on the line
+                && tag.getFirstChild().getNextSibling() == null;
+
     }
 
     /**
