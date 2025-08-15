@@ -460,6 +460,24 @@ public class JavadocParagraphCheck extends AbstractJavadocCheck {
      */
     private static boolean isNotImmediatelyFollowedByText(DetailNode tag) {
 
+
+        final Optional<DetailNode> htmlElementText = JavadocUtil.findFirstTokenByPredicate(tag,
+                        node -> node.getType() == JavadocCommentsTokenTypes.TEXT)
+                .filter(text -> text.getText().startsWith(" "));
+
+        final Optional<DetailNode> htmlContentText = JavadocUtil.findFirstTokenByPredicate(tag,
+                        node -> node.getType() == JavadocCommentsTokenTypes.HTML_CONTENT)
+                .map(content -> JavadocUtil.findFirstToken(content,
+                        JavadocCommentsTokenTypes.TEXT))
+                .filter(text -> text.getText().startsWith(" "));
+
+        // need to handle comments here
+        if (tag.getLineNumber() == 23) {
+            System.out.println(DetailNodeTreeStringPrinter.printTree(tag, "", ""));
+        }
+
+        // TODO: left off on testJavadocParagraphOpenClosedTag3
+
         // TODO: extract to it's own condition AND reconsider EOF
         // TODO: create some utility for finding html text?
         return tag.getNextSibling() == null
