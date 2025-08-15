@@ -189,7 +189,7 @@ public class JavadocParagraphCheck extends AbstractJavadocCheck {
     @Override
     public void visitJavadocToken(DetailNode ast) {
         if (ast.getLineNumber() == 87) {
-            System.out.println(DetailNodeTreeStringPrinter.printTree(ast.getParent(), "", ""));
+            System.out.println(DetailNodeTreeStringPrinter.printTree(ast.getParent().getParent(), "", ""));
         }
         if (ast.getType() == JavadocCommentsTokenTypes.NEWLINE && isEmptyLine(ast)) {
             checkEmptyLine(ast);
@@ -227,7 +227,7 @@ public class JavadocParagraphCheck extends AbstractJavadocCheck {
     private void checkParagraphTag(DetailNode tag) {
 
         if (tag.getLineNumber() == 58) {
-            System.out.println(DetailNodeTreeStringPrinter.printTree(tag, "", ""));
+           // System.out.println(DetailNodeTreeStringPrinter.printTree(tag, "", ""));
         }
         if (!isNestedParagraph(tag)) {
             final DetailNode newLine = getNearestEmptyLine(tag);
@@ -300,7 +300,7 @@ public class JavadocParagraphCheck extends AbstractJavadocCheck {
     private static Optional<DetailNode> findFirstHtmlElementAfter(DetailNode tag) {
 
         if (tag.getLineNumber() == 58) {
-            System.out.println(DetailNodeTreeStringPrinter.printTree(tag, "", ""));
+            //System.out.println(DetailNodeTreeStringPrinter.printTree(tag, "", ""));
         }
 
         return JavadocUtil.findFirstTokenByPredicate(tag,
@@ -332,21 +332,71 @@ public class JavadocParagraphCheck extends AbstractJavadocCheck {
     private static boolean isEmptyLine(DetailNode newLine) {
         boolean result = false;
         DetailNode previousSibling = newLine.getPreviousSibling();
-        if (previousSibling != null
-                && previousSibling.getParent().getType() == JavadocCommentsTokenTypes.JAVADOC_CONTENT
-                || previousSibling != null && previousSibling.getParent() != null
-                && previousSibling.getParent().getParent() != null
-                && previousSibling.getParent().getParent().getType()
-                    == JavadocCommentsTokenTypes.JAVADOC_CONTENT) {
+
+        if (previousSibling != null && isInJavadocContent(previousSibling)) {
+
+            // Skip over blank TEXT nodes
             if (previousSibling.getType() == JavadocCommentsTokenTypes.TEXT
                     && CommonUtil.isBlank(previousSibling.getText())) {
                 previousSibling = previousSibling.getPreviousSibling();
             }
+
+            result = previousSibling != null
+                    && previousSibling.getType() == JavadocCommentsTokenTypes.LEADING_ASTERISK;
+        } else if (!isInJavadocContent(newLine) && !isInParagraphTag(newLine)) {
+            result = false;
+        } else {
             result = previousSibling != null
                     && previousSibling.getType() == JavadocCommentsTokenTypes.LEADING_ASTERISK;
         }
+
         return result;
     }
+
+
+
+    private static boolean isInJavadocContent(DetailNode node) {
+        final boolean result;
+        final DetailNode parent = node.getParent();
+
+        if (parent != null) {
+            if (parent.getType() == JavadocCommentsTokenTypes.JAVADOC_CONTENT) {
+                result = true;
+            }
+            else if (parent.getType() == JavadocCommentsTokenTypes.HTML_ELEMENT) {
+                result = false;
+            }
+            else {
+                result = isInJavadocContent(parent);
+            }
+        } else {
+            result = false;
+        }
+
+        return result;
+    }
+
+    private static boolean isInParagraphTag(DetailNode node) {
+        boolean result = false;
+        DetailNode parent = node.getParent();
+
+        if (parent != null) {
+            if (isParagraphTag(parent)) {
+                result = true;
+            }
+            else if (parent.getType() == JavadocCommentsTokenTypes.JAVADOC_CONTENT) {
+                result = false;
+            }
+            else {
+                result = isInParagraphTag(parent);
+            }
+        }
+
+        return result;
+    }
+
+
+
 
     /**
      * Determines whether or not the line with paragraph tag is first line in javadoc.
