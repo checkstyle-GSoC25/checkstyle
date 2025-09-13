@@ -20,11 +20,9 @@
 package com.puppycrawl.tools.checkstyle.meta;
 
 import java.util.ArrayDeque;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Map;
@@ -40,9 +38,10 @@ import javax.xml.transform.TransformerException;
 import com.puppycrawl.tools.checkstyle.FileStatefulCheck;
 import com.puppycrawl.tools.checkstyle.api.DetailAST;
 import com.puppycrawl.tools.checkstyle.api.DetailNode;
-import com.puppycrawl.tools.checkstyle.api.JavadocTokenTypes;
+import com.puppycrawl.tools.checkstyle.api.JavadocCommentsTokenTypes;
 import com.puppycrawl.tools.checkstyle.api.TokenTypes;
 import com.puppycrawl.tools.checkstyle.checks.javadoc.AbstractJavadocCheck;
+import com.puppycrawl.tools.checkstyle.utils.JavadocUtil;
 import com.puppycrawl.tools.checkstyle.utils.TokenUtil;
 
 /**
@@ -132,7 +131,7 @@ public class JavadocMetadataScraper extends AbstractJavadocCheck {
     /**
      * Boolean variable which lets us know whether we should scan and scrape the current javadoc
      * or not. Since we need only class level javadoc, it becomes true at its root and false after
-     * encountering {@code JavadocTokenTypes.SINCE_LITERAL}.
+     * encountering {@code JavadocCommentsTokenTypes.SINCE_BLOCK_TAG}.
      */
     private boolean toScan;
 
@@ -140,22 +139,22 @@ public class JavadocMetadataScraper extends AbstractJavadocCheck {
     private DetailNode rootNode;
 
     /**
-     * Child number of the property section node, where parent is the class level javadoc root
-     * node.
+     * Node marking the start of the property section in the class-level Javadoc.
+     * The parent of this node is the Javadoc root node.
      */
-    private int propertySectionStartIdx;
+    private DetailNode propertySectionStart;
 
     /**
-     * Child number of the example section node, where parent is the class level javadoc root
-     * node.
+     * Node marking the start of the example section in the class-level Javadoc.
+     * The parent of this node is the Javadoc root node.
      */
-    private int exampleSectionStartIdx;
+    private DetailNode exampleSectionStart;
 
     /**
-     * Child number of the parent section node, where parent is the class level javadoc root
-     * node.
+     * Node marking the start of the parent section in the class-level Javadoc.
+     * The parent of this node is the Javadoc root node.
      */
-    private int parentSectionStartIdx;
+    private DetailNode parentSectionStart;
 
     /**
      * Control whether to write XML output or not.
@@ -174,10 +173,9 @@ public class JavadocMetadataScraper extends AbstractJavadocCheck {
     @Override
     public int[] getDefaultJavadocTokens() {
         return new int[] {
-            JavadocTokenTypes.JAVADOC,
-            JavadocTokenTypes.PARAGRAPH,
-            JavadocTokenTypes.LI,
-            JavadocTokenTypes.SINCE_LITERAL,
+            JavadocCommentsTokenTypes.JAVADOC_CONTENT,
+            JavadocCommentsTokenTypes.HTML_ELEMENT,
+            JavadocCommentsTokenTypes.SINCE_BLOCK_TAG,
         };
     }
 
@@ -192,9 +190,9 @@ public class JavadocMetadataScraper extends AbstractJavadocCheck {
             moduleDetails = new ModuleDetails();
             toScan = false;
             scrapingViolationMessageList = false;
-            propertySectionStartIdx = -1;
-            exampleSectionStartIdx = -1;
-            parentSectionStartIdx = -1;
+            propertySectionStart = null;
+            exampleSectionStart = null;
+            parentSectionStart = null;
 
             String moduleName = getModuleSimpleName();
             final String checkModuleExtension = "Check";
@@ -214,14 +212,14 @@ public class JavadocMetadataScraper extends AbstractJavadocCheck {
             scrapeContent(ast);
         }
 
-        if (ast.getType() == JavadocTokenTypes.JAVADOC) {
+        if (ast.getType() == JavadocCommentsTokenTypes.JAVADOC_CONTENT) {
             final DetailAST parent = getParent(getBlockCommentAst());
             if (parent.getType() == TokenTypes.CLASS_DEF) {
                 rootNode = ast;
                 toScan = true;
             }
         }
-        else if (ast.getType() == JavadocTokenTypes.SINCE_LITERAL) {
+        else if (ast.getType() == JavadocCommentsTokenTypes.SINCE_BLOCK_TAG) {
             toScan = false;
         }
     }
@@ -259,72 +257,128 @@ public class JavadocMetadataScraper extends AbstractJavadocCheck {
      * @param ast javadoc ast
      */
     private void scrapeContent(DetailNode ast) {
-        if (ast.getType() == JavadocTokenTypes.PARAGRAPH) {
-            if (isParentText(ast)) {
-                parentSectionStartIdx = getParentIndexOf(ast);
-                moduleDetails.setParent(getParentText(ast));
-            }
-            else if (isViolationMessagesText(ast)) {
-                scrapingViolationMessageList = true;
-            }
-            else if (exampleSectionStartIdx == -1
-                    && isExamplesText(ast)) {
-                exampleSectionStartIdx = getParentIndexOf(ast);
-            }
+        final DetailNode htmlContent = JavadocUtil.findFirstToken(ast,
+                JavadocCommentsTokenTypes.HTML_CONTENT);
+        if (isParagraphTag(ast) && htmlContent != null) {
+            handleParagraph(ast, htmlContent);
         }
-        else if (ast.getType() == JavadocTokenTypes.LI) {
-            if (isPropertyList(ast)) {
-                if (propertySectionStartIdx == -1) {
-                    propertySectionStartIdx = getParentIndexOf(ast);
-                }
-                moduleDetails.addToProperties(createProperties(ast));
-            }
-            else if (scrapingViolationMessageList) {
-                moduleDetails.addToViolationMessages(getViolationMessages(ast));
-            }
+        else if (isLiTag(ast) && htmlContent != null) {
+            handleListItem(ast, htmlContent);
         }
+    }
+
+    /**
+     * Handles a paragraph element within the Javadoc comment.
+     * <p>Depending on the paragraph's content, this method may:
+     * <ul>
+     *   <li>Set the parent section start node and record the parent text,</li>
+     *   <li>Mark the beginning of the violation messages section, or</li>
+     *   <li>Record the start of the examples section.</li>
+     * </ul>
+     *
+     * @param ast the paragraph AST node
+     * @param htmlContent the HTML content inside the paragraph
+     */
+    private void handleParagraph(DetailNode ast, DetailNode htmlContent) {
+        if (isParentText(htmlContent)) {
+            parentSectionStart = getParentOf(ast);
+            moduleDetails.setParent(getParentText(htmlContent));
+        }
+        else if (isViolationMessagesText(htmlContent)) {
+            scrapingViolationMessageList = true;
+        }
+        else if (exampleSectionStart == null && isExamplesText(htmlContent)) {
+            exampleSectionStart = getParentOf(ast);
+        }
+    }
+
+    /**
+     * Handles a list item element within the Javadoc comment.
+     * <p>Depending on the list item's content, this method may:
+     * <ul>
+     *   <li>Set the property section start node and extract property definitions, or</li>
+     *   <li>Add violation messages if the parser is inside a violation messages list.</li>
+     * </ul>
+     *
+     * @param ast the list item AST node
+     * @param htmlContent the HTML content inside the list item
+     */
+    private void handleListItem(DetailNode ast, DetailNode htmlContent) {
+        if (isPropertyList(htmlContent)) {
+            if (propertySectionStart == null) {
+                propertySectionStart = getParentOf(ast);
+            }
+            moduleDetails.addToProperties(createProperties(htmlContent));
+        }
+        else if (scrapingViolationMessageList) {
+            moduleDetails.addToViolationMessages(getViolationMessages(htmlContent));
+        }
+    }
+    
+    /**
+     * Checks whether the given AST node represents a paragraph HTML element.
+     *
+     * @param ast the AST node to check
+     * @return {@code true} if the node is a paragraph tag, {@code false} otherwise
+     */
+    private boolean isParagraphTag(DetailNode ast) {
+        return ast.getType() == JavadocCommentsTokenTypes.HTML_ELEMENT 
+                && JavadocUtil.isTag(ast, "p");
+    }
+    
+    /**
+     * Checks whether the given AST node represents a paragraph list item element.
+     *
+     * @param ast the AST node to check
+     * @return {@code true} if the node is a paragraph tag, {@code false} otherwise
+     */
+    private boolean isLiTag(DetailNode ast) {
+        return ast.getType() == JavadocCommentsTokenTypes.HTML_ELEMENT
+                &&  JavadocUtil.isTag(ast, "li");
     }
 
     /**
      * Create the modulePropertyDetails content.
      *
-     * @param nodeLi list item javadoc node
+     * @param htmlContent html content javadoc node
      * @return modulePropertyDetail object for the corresponding property
      */
-    private static ModulePropertyDetails createProperties(DetailNode nodeLi) {
+    private static ModulePropertyDetails createProperties(DetailNode htmlContent) {
         final ModulePropertyDetails modulePropertyDetails = new ModulePropertyDetails();
 
-        final Optional<DetailNode> propertyNameNode = getFirstChildOfType(nodeLi,
-                JavadocTokenTypes.JAVADOC_INLINE_TAG, 0);
+        final Optional<DetailNode> propertyNameNode = Optional.ofNullable(
+                JavadocUtil.findFirstToken(htmlContent,
+                        JavadocCommentsTokenTypes.JAVADOC_INLINE_TAG));
+        
         if (propertyNameNode.isPresent()) {
             final DetailNode propertyNameTag = propertyNameNode.orElseThrow();
             final String propertyName = getTextFromTag(propertyNameTag);
 
-            final DetailNode propertyType = getFirstChildOfMatchingText(nodeLi, TYPE_TAG)
+            final DetailNode propertyType = getFirstChildOfMatchingText(htmlContent, TYPE_TAG)
                 .orElseThrow(() -> {
                     return new MetadataGenerationException(String.format(
                         Locale.ROOT, PROP_TYPE_MISSING, propertyName)
                     );
                 });
             final String propertyDesc = DESC_CLEAN.matcher(
-                    constructSubTreeText(nodeLi, propertyNameTag.getIndex() + 1,
-                            propertyType.getIndex() - 1))
+                    constructSubTreeText(propertyNameTag.getNextSibling(),
+                            propertyType.getPreviousSibling()))
                     .replaceAll(Matcher.quoteReplacement(""));
 
             modulePropertyDetails.setDescription(propertyDesc.trim());
             modulePropertyDetails.setName(propertyName);
-            modulePropertyDetails.setType(getTagTextFromProperty(nodeLi, propertyType));
+            modulePropertyDetails.setType(getTagTextFromProperty(propertyType));
 
-            final Optional<DetailNode> validationTypeNodeOpt = getFirstChildOfMatchingText(nodeLi,
+            final Optional<DetailNode> validationTypeNodeOpt = getFirstChildOfMatchingText(htmlContent,
                 VALIDATION_TYPE_TAG);
             if (validationTypeNodeOpt.isPresent()) {
                 final DetailNode validationTypeNode = validationTypeNodeOpt.orElseThrow();
-                modulePropertyDetails.setValidationType(getTagTextFromProperty(nodeLi,
-                    validationTypeNode));
+                modulePropertyDetails.setValidationType(getTagTextFromProperty(
+                        validationTypeNode));
             }
 
-            final String defaultValue = getFirstChildOfMatchingText(nodeLi, DEFAULT_VALUE_TAG)
-                .map(defaultValueNode -> getPropertyDefaultText(nodeLi, defaultValueNode))
+            final String defaultValue = getFirstChildOfMatchingText(htmlContent, DEFAULT_VALUE_TAG)
+                .map(defaultValueNode -> getPropertyDefaultText(htmlContent, defaultValueNode))
                 .orElseThrow(() -> {
                     return new MetadataGenerationException(String.format(
                         Locale.ROOT, PROP_DEFAULT_VALUE_MISSING, propertyName)
@@ -340,18 +394,16 @@ public class JavadocMetadataScraper extends AbstractJavadocCheck {
     /**
      * Get tag text from property data.
      *
-     * @param nodeLi javadoc li item node
      * @param propertyMeta property javadoc node
      * @return property metadata text
      */
-    private static String getTagTextFromProperty(DetailNode nodeLi, DetailNode propertyMeta) {
-        final Optional<DetailNode> tagNodeOpt = getFirstChildOfType(nodeLi,
-                JavadocTokenTypes.JAVADOC_INLINE_TAG, propertyMeta.getIndex() + 1);
-        DetailNode tagNode = null;
-        if (tagNodeOpt.isPresent()) {
-            tagNode = tagNodeOpt.orElseThrow();
+    private static String getTagTextFromProperty(DetailNode propertyMeta) {
+        final DetailNode tagNode = findFirstMeaningfulToken(propertyMeta);
+        String result = "";
+        if (tagNode != null) {
+            result = getTextFromTag(tagNode);
         }
-        return getTextFromTag(tagNode);
+        return result;
     }
 
     /**
@@ -370,45 +422,39 @@ public class JavadocMetadataScraper extends AbstractJavadocCheck {
     }
 
     /**
-     * Performs a DFS of the subtree with a node as the root and constructs the text of that
-     * tree, ignoring JavadocToken texts.
+     * Performs a depth-first traversal of the subtree starting at {@code startNode}
+     * and ending at {@code endNode}, and constructs the concatenated text of all nodes
+     * in that range, ignoring {@code JavadocToken} texts.
      *
-     * @param node root node of subtree
-     * @param childLeftLimit the left index of root children from where to scan
-     * @param childRightLimit the right index of root children till where to scan
-     * @return constructed text of subtree
+     * @param startNode the node where traversal begins (inclusive)
+     * @param endNode the node where traversal ends (inclusive)
+     * @return the constructed text from the specified subtree range
      */
-    public static String constructSubTreeText(DetailNode node, int childLeftLimit,
-                                               int childRightLimit) {
-        DetailNode detailNode = node;
-
-        final Deque<DetailNode> stack = new ArrayDeque<>();
-        stack.addFirst(detailNode);
-        final Set<DetailNode> visited = new HashSet<>();
+    public static String constructSubTreeText(DetailNode startNode,
+                                               DetailNode endNode) {
+        DetailNode curNode = startNode;
         final StringBuilder result = new StringBuilder(1024);
-        while (!stack.isEmpty()) {
-            detailNode = stack.removeFirst();
+        
+        while (curNode != null) {
+            if (isContentToWrite(curNode)) {
+                String childText = curNode.getText();
 
-            if (visited.add(detailNode) && isContentToWrite(detailNode)) {
-                String childText = detailNode.getText();
-
-                if (detailNode.getParent().getType() == JavadocTokenTypes.JAVADOC_INLINE_TAG) {
-                    childText = adjustCodeInlineTagChildToHtml(detailNode);
+                if (curNode.getParent() != null && curNode.getParent().getParent() != null 
+                        && curNode.getParent().getParent().getType() 
+                        == JavadocCommentsTokenTypes.JAVADOC_INLINE_TAG) {
+                    childText = adjustCodeInlineTagChildToHtml(curNode);
                 }
 
-                result.insert(0, childText);
+                result.append(childText);
             }
-
-            for (DetailNode child : detailNode.getChildren()) {
-                if (child.getParent().equals(node)
-                        && (child.getIndex() < childLeftLimit
-                        || child.getIndex() > childRightLimit)) {
-                    continue;
-                }
-                if (!visited.contains(child)) {
-                    stack.addFirst(child);
-                }
+            
+            DetailNode toVisit = curNode.getFirstChild();
+            while (curNode != endNode && toVisit == null) {
+                toVisit = curNode.getNextSibling();
+                curNode = curNode.getParent();
             }
+            
+            curNode = toVisit;
         }
         return result.toString().trim();
     }
@@ -421,8 +467,8 @@ public class JavadocMetadataScraper extends AbstractJavadocCheck {
      */
     private static boolean isContentToWrite(DetailNode detailNode) {
 
-        return detailNode.getType() != JavadocTokenTypes.LEADING_ASTERISK
-            && (detailNode.getType() == JavadocTokenTypes.TEXT
+        return detailNode.getType() != JavadocCommentsTokenTypes.LEADING_ASTERISK
+            && (detailNode.getType() == JavadocCommentsTokenTypes.TEXT
             || !TOKEN_TEXT_PATTERN.matcher(detailNode.getText()).matches());
     }
 
@@ -435,11 +481,10 @@ public class JavadocMetadataScraper extends AbstractJavadocCheck {
     public static String adjustCodeInlineTagChildToHtml(DetailNode codeChild) {
 
         return switch (codeChild.getType()) {
-            case JavadocTokenTypes.JAVADOC_INLINE_TAG_END -> "</code>";
-            case JavadocTokenTypes.WS -> "";
-            case JavadocTokenTypes.CODE_LITERAL -> codeChild.getText().replace("@", "") + ">";
-            case JavadocTokenTypes.JAVADOC_INLINE_TAG_START -> "<";
-            default -> codeChild.getText();
+            case JavadocCommentsTokenTypes.JAVADOC_INLINE_TAG_END -> "</code>";
+            case JavadocCommentsTokenTypes.TAG_NAME -> "";
+            case JavadocCommentsTokenTypes.JAVADOC_INLINE_TAG_START -> "<code>";
+            default -> codeChild.getText().trim();
         };
     }
 
@@ -451,39 +496,90 @@ public class JavadocMetadataScraper extends AbstractJavadocCheck {
      * @return description text
      */
     private String getDescriptionText() {
-        final int descriptionEndIdx;
-        if (propertySectionStartIdx > -1) {
-            descriptionEndIdx = propertySectionStartIdx;
+        final DetailNode descriptionEnd;
+        final String description;
+        if (propertySectionStart != null) {
+            descriptionEnd = propertySectionStart;
         }
-        else if (exampleSectionStartIdx > -1) {
-            descriptionEndIdx = exampleSectionStartIdx;
+        else if (exampleSectionStart != null) {
+            descriptionEnd = exampleSectionStart;
         }
         else {
-            descriptionEndIdx = parentSectionStartIdx;
+            descriptionEnd = parentSectionStart;
         }
-        return constructSubTreeText(rootNode, 0, descriptionEndIdx - 1);
+        
+        if (descriptionEnd == null) {
+            description = "";
+        }
+        else {
+            description = 
+                    constructSubTreeText(rootNode, descriptionEnd.getPreviousSibling());
+        }
+        
+        return description;
     }
 
     /**
      * Create property default text, which is either normal property value or list of tokens.
      *
-     * @param nodeLi list item javadoc node
-     * @param defaultValueNode default value node
-     * @return default property text
+     * @param htmlContent the HTML content node containing the Javadoc for the property
+     * @param defaultValueNode the node marking the start of the default value
+     * @return the default property text
      */
-    private static String getPropertyDefaultText(DetailNode nodeLi, DetailNode defaultValueNode) {
-        final Optional<DetailNode> propertyDefaultValueTag = getFirstChildOfType(nodeLi,
-                JavadocTokenTypes.JAVADOC_INLINE_TAG, defaultValueNode.getIndex() + 1);
+    private static String getPropertyDefaultText(DetailNode htmlContent, DetailNode defaultValueNode) {
+        final DetailNode propertyDefaultValueTag = findFirstMeaningfulToken(defaultValueNode);
         final String result;
-        if (propertyDefaultValueTag.isPresent()) {
-            result = getTextFromTag(propertyDefaultValueTag.orElseThrow());
+        if (propertyDefaultValueTag != null
+                && propertyDefaultValueTag.getType()
+                    == JavadocCommentsTokenTypes.JAVADOC_INLINE_TAG) {
+            result = getTextFromTag(propertyDefaultValueTag);
         }
         else {
-            final String tokenText = constructSubTreeText(nodeLi,
-                    defaultValueNode.getIndex(), nodeLi.getChildren().length);
+            final String tokenText = constructSubTreeText(defaultValueNode, 
+                    getLastChild(htmlContent));
             result = cleanDefaultTokensText(tokenText);
         }
         return result;
+    }
+    
+    /**
+     * Finds the first meaningful sibling token after the given node.
+     * <p>
+     * A meaningful token is the first sibling that is not a leading asterisk,
+     * not a newline, and not an empty text node (whitespace-only).
+     * </p>
+     *
+     * @param detailNode the reference node whose next siblings are scanned
+     * @return the first meaningful sibling token, or {@code null} if none exists
+     */
+    private static DetailNode findFirstMeaningfulToken(DetailNode detailNode) {
+        DetailNode result = null;
+        for (DetailNode currNode = detailNode.getNextSibling();
+                currNode != null; currNode = currNode.getNextSibling()) {
+            final int type = currNode.getType();
+            final boolean isEmptyText = type == JavadocCommentsTokenTypes.TEXT
+                        && currNode.getText().trim().isEmpty();
+            if (type != JavadocCommentsTokenTypes.LEADING_ASTERISK
+                    && type != JavadocCommentsTokenTypes.NEWLINE && !isEmptyText) {
+                result = currNode;
+                break;
+            }
+        }
+        return result;
+    }
+    
+    /**
+     * Get the last child of the parent node.
+     *
+     * @param parentNode parent node
+     * @return last child node
+     */
+    private static DetailNode getLastChild(DetailNode parentNode) {
+        DetailNode node = parentNode.getFirstChild();
+        while (node.getNextSibling() != null) {
+            node = node.getNextSibling();
+        }
+        return node;
     }
 
     /**
@@ -494,7 +590,7 @@ public class JavadocMetadataScraper extends AbstractJavadocCheck {
      */
     private static String getViolationMessages(DetailNode nodeLi) {
         final Optional<DetailNode> resultNode = getFirstChildOfType(nodeLi,
-                JavadocTokenTypes.JAVADOC_INLINE_TAG, 0);
+                JavadocCommentsTokenTypes.JAVADOC_INLINE_TAG);
         return resultNode.map(JavadocMetadataScraper::getTextFromTag).orElse("");
     }
 
@@ -505,23 +601,20 @@ public class JavadocMetadataScraper extends AbstractJavadocCheck {
      * @return text contained by the tag
      */
     private static String getTextFromTag(DetailNode nodeTag) {
-        return Optional.ofNullable(nodeTag).map(JavadocMetadataScraper::getText).orElse("");
+        return Optional.ofNullable(nodeTag.getFirstChild())
+                .map(JavadocMetadataScraper::getText).orElse("");
     }
-
+    
     /**
-     * Returns the first child node which matches the provided {@code TokenType} and has the
-     * children index after the offset value.
+     * Returns the first child node of the given parent that matches the provided {@code tokenType}.
      *
-     * @param node parent node
-     * @param tokenType token type to match
-     * @param offset children array index offset
-     * @return the first child satisfying the conditions
+     * @param node the parent node
+     * @param tokenType the token type to match
+     * @return an {@link Optional} containing the first matching child node,
+     *         or an empty {@link Optional} if none is found
      */
-    private static Optional<DetailNode> getFirstChildOfType(DetailNode node, int tokenType,
-                                                            int offset) {
-        return Arrays.stream(node.getChildren())
-                .filter(child -> child.getIndex() >= offset && child.getType() == tokenType)
-                .findFirst();
+    private static Optional<DetailNode> getFirstChildOfType(DetailNode node, int tokenType) {
+        return JavadocUtil.getAllNodesOfType(node, tokenType).stream().findFirst();
     }
 
     /**
@@ -531,8 +624,8 @@ public class JavadocMetadataScraper extends AbstractJavadocCheck {
      * @return the joined text of node
      */
     private static String getText(DetailNode parentNode) {
-        return Arrays.stream(parentNode.getChildren())
-                .filter(child -> child.getType() == JavadocTokenTypes.TEXT)
+        return JavadocUtil.getAllNodesOfType(parentNode, JavadocCommentsTokenTypes.TEXT)
+                .stream()
                 .map(node -> QUOTE_PATTERN.matcher(node.getText().trim()).replaceAll(""))
                 .collect(Collectors.joining(" "));
     }
@@ -546,7 +639,8 @@ public class JavadocMetadataScraper extends AbstractJavadocCheck {
      */
     private static Optional<DetailNode> getFirstChildOfMatchingText(DetailNode node,
                                                                     Pattern pattern) {
-        return Arrays.stream(node.getChildren())
+        return JavadocUtil.getAllNodesOfType(node, JavadocCommentsTokenTypes.TEXT)
+                .stream()
                 .filter(child -> pattern.matcher(child.getText()).matches())
                 .findFirst();
     }
@@ -576,22 +670,23 @@ public class JavadocMetadataScraper extends AbstractJavadocCheck {
      * @param node subtree child node
      * @return root node child index
      */
-    public static int getParentIndexOf(DetailNode node) {
+    public static DetailNode getParentOf(DetailNode node) {
         DetailNode currNode = node;
-        while (currNode.getParent().getIndex() != -1) {
+        while (currNode.getParent().getType() 
+                != JavadocCommentsTokenTypes.JAVADOC_CONTENT) {
             currNode = currNode.getParent();
         }
-        return currNode.getIndex();
+        return currNode;
     }
 
     /**
      * Get module parent text from paragraph javadoc node.
      *
-     * @param nodeParagraph paragraph javadoc node
+     * @param htmlContent html content javadoc node
      * @return parent text
      */
-    private static String getParentText(DetailNode nodeParagraph) {
-        return getFirstChildOfType(nodeParagraph, JavadocTokenTypes.JAVADOC_INLINE_TAG, 0)
+    private static String getParentText(DetailNode htmlContent) {
+        return getFirstChildOfType(htmlContent, JavadocCommentsTokenTypes.JAVADOC_INLINE_TAG)
                 .map(JavadocMetadataScraper::getTextFromTag)
                 .orElse(null);
     }
@@ -692,11 +787,11 @@ public class JavadocMetadataScraper extends AbstractJavadocCheck {
     /**
      * Checks whether the list item node is part of a property list.
      *
-     * @param nodeLi {@code JavadocTokenType.LI} node
+     * @param htmlContent {@link JavadocCommentsTokenTypes#HTML_CONTENT} node
      * @return true if the node is part of a property list
      */
-    private static boolean isPropertyList(DetailNode nodeLi) {
-        return isChildNodeTextMatches(nodeLi, PROPERTY_TAG);
+    private static boolean isPropertyList(DetailNode htmlContent) {
+        return isChildNodeTextMatches(htmlContent, PROPERTY_TAG);
     }
 
     /**
@@ -714,11 +809,11 @@ public class JavadocMetadataScraper extends AbstractJavadocCheck {
      * Checks whether the {@code JavadocTokenType.PARAGRAPH} node is referring to the parent
      * javadoc segment.
      *
-     * @param nodeParagraph paragraph javadoc node
+     * @param htmlContent {@link JavadocCommentsTokenTypes#HTML_CONTENT} node
      * @return true if paragraph node contains the parent text
      */
-    public static boolean isParentText(DetailNode nodeParagraph) {
-        return isChildNodeTextMatches(nodeParagraph, PARENT_TAG);
+    public static boolean isParentText(DetailNode htmlContent) {
+        return isChildNodeTextMatches(htmlContent, PARENT_TAG);
     }
 
     /**
@@ -729,7 +824,7 @@ public class JavadocMetadataScraper extends AbstractJavadocCheck {
      * @return true if one of child text nodes matches pattern
      */
     public static boolean isChildNodeTextMatches(DetailNode ast, Pattern pattern) {
-        return getFirstChildOfType(ast, JavadocTokenTypes.TEXT, 0)
+        return getFirstChildOfType(ast, JavadocCommentsTokenTypes.TEXT)
                 .map(DetailNode::getText)
                 .map(pattern::matcher)
                 .map(Matcher::matches)
